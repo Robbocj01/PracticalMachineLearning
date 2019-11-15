@@ -1,0 +1,167 @@
+---
+title: "Practical Machine Learning Project"
+author: "Chris Robertson"
+date: "November 2019"
+output: html_document
+---
+
+
+This document is the final project for the Coursera “Practical Machine Learning” course. It was produced using RStudio’s Markdown and Knitr.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+# Sets working directory to Coursera Assignment Directory
+setwd("C:/Users/rober/Desktop/Coursera/PracticalMachineLearning")
+```
+
+# Overview
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. 
+
+One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, the goal is to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways.
+
+The data consists of a training data and a test data (to be used to validate the selected model).
+
+The goal of the project is to predict the manner in which they did the exercise. This is the “classe” variable in the training set. The projects uses any of the other variables to predict with.
+
+Data source: The dataset used in this project is a courtesy of Velloso, E.; Bulling, A.; Gellersen, H.; Ugulino, W.; Fuks, H. Qualitative Activity Recognition of Weight Lifting Exercises. Proceedings of 4th International Conference in Cooperation with SIGCHI (Augmented Human '13) . Stuttgart, Germany: ACM SIGCHI, 2013.
+
+# Preparing Analytical Environment
+
+Loading required packages.
+
+```{r cars}
+library(knitr)
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(rattle)
+library(randomForest)
+
+
+#Clean Data Environment
+rm(list = ls())
+
+#Runs Data Download Script
+source("Download_Data.R")
+```
+## Load Data
+
+After downloading the data from the data source, we can read the two csv files into two data frames.   
+```{r, cache = T} 
+trainRaw <- read.csv("pml-training.csv") 
+testRaw <- read.csv("pml-testing.csv") 
+``` 
+
+The training data set contains `r nrow(trainRaw)` observations and `r ncol(trainRaw)` variables, while the testing data set contains `r nrow(testRaw)` observations and `r ncol(testRaw)` variables.
+
+## Preprocessing Data
+We remove the variables that contains missing values. 
+
+``` {r}
+trainRaw<- trainRaw[, colSums(is.na(trainRaw)) == 0]
+testRaw <- testRaw[, colSums(is.na(testRaw)) == 0]
+```
+
+The first seven columns are removed as they will not be used in this analysis.
+
+``` {r}
+trainData <- trainRaw[, -c(1:7)]
+dim(trainRaw)
+dim(testRaw)
+```
+
+Training data is then split into training and test sets. 
+
+``` {r}
+set.seed(1234) 
+inTrain <- createDataPartition(trainData$classe, p = 0.7, list = FALSE)
+trainData <- trainData[inTrain, ]
+testData <- trainData[-inTrain, ]
+```
+
+The final stage of the date preprossing is to remove columns that have near zero variance.
+
+``` {r}
+near_zero_var <- nearZeroVar(trainData)
+trainData <- trainData[, -near_zero_var]
+testData  <- testData[, -near_zero_var]
+dim(trainData)
+dim(testData)
+```
+
+We now have 53 variables with which we can build and test the model. 
+
+# Model Building
+
+In this section we will use three different algorithms to predict the outcome.
+
+1. Classification tree
+2. Random forest
+3. Gradient Boosted Model
+
+## Classification Trees
+
+We first generate the model and then we plot the classification tree as a dendogram.
+``` {r}
+set.seed(12345)
+modFitDecTree <- rpart(classe ~ ., data=trainData, method="class")
+fancyRpartPlot(modFitDecTree)
+```
+
+Validation of the model “modFitDecTree” on the testData to find out how well it performs by looking at the accuracy variable.
+
+``` {r}
+predictDecTree <- predict(modFitDecTree, newdata=testData, type="class")
+confMatDecTree <- confusionMatrix(predictDecTree, testData$classe)
+confMatDecTree
+```
+The accuracy rate of the model is low: `r confMatDecTree$overall['Accuracy']` and therefore the out-of-sample-error is about `r 1 - confMatDecTree$overall['Accuracy']`.
+
+## Random Forest
+We then test the randon forest model. The first step is the creation of the random forest model itself. In this process we apply a 5 fold cross validation method.
+
+``` {r}
+trainControl <- trainControl(method="cv", number=5)
+model_RF <- train(classe~., data=trainData, method="rf", trControl=trainControl, verbose=FALSE)
+print(model_RF)
+```
+
+The plot of the random forest model  showing the accuracy of random forest model by number of predictorsis as follows.
+
+``` {r}
+plot(model_RF, main="Accuracy of Random forest model by number of predictors")
+trainpred <- predict(model_RF,newdata=testData)
+
+confMatRF <- confusionMatrix(testData$classe,trainpred)
+confMatRF
+```
+
+With random forest, we reach an accuracy of `r confMatRF$overall['Accuracy']` using cross-validation with 5 steps and therefore the out-of-sample-error is about `r 1 - confMatRF$overall['Accuracy']`.   While this is good it may be worth investigating further because the low out of sample error may be due to overfitting.   This however is outside the scope of this project.
+
+## Gradient Boosted Model
+
+The last model we will test is the GBM model. In this process we apply the same 5 fold cross validation method we used for the random forest.
+
+
+``` {r}
+model_GBM <- train(classe~., data=trainData, method="gbm", trControl=trainControl, verbose=FALSE)
+print(model_GBM)
+
+predictGBM <- predict(model_GBM, newdata=testData)
+conmatrix_GBM <- confusionMatrix(predictGBM, testData$classe)
+conmatrix_GBM
+```
+
+With GMB, we reach an accuracy of `r conmatrix_GBM$overall['Accuracy']` using cross-validation with 5 steps and therefore the out-of-sample-error is about `r 1 - conmatrix_GBM$overall['Accuracy']`.
+
+
+## Running In-sample test using most accurate model
+
+By comparing the accuracy rate values of the three models, it is clear the the ‘Random Forest’ model is the winner with an accuracy of ~1. This is the model we will use on the validation data.
+
+``` {r}
+Results <- predict(model_RF, newdata=testRaw)
+Results
+```
